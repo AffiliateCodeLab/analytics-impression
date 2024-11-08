@@ -27,7 +27,8 @@
   function getClientId() {
     let clientId = localStorage.getItem("analytics_client_id");
     if (!clientId) {
-      clientId = uuidv4();
+      const nanoid = Math.random().toString(36).substring(2, 14);
+      clientId = `${Math.floor(Date.now() / 1000)}-${nanoid}`;
       localStorage.setItem("analytics_client_id", clientId);
     }
     return clientId;
