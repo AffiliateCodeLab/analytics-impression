@@ -24,6 +24,15 @@
     return sessionId;
   }
 
+  function getClientId() {
+    let clientId = localStorage.getItem("analytics_client_id");
+    if (!clientId) {
+      clientId = uuidv4();
+      localStorage.setItem("analytics_client_id", clientId);
+    }
+    return clientId;
+  }
+
   function parseCookies() {
     return document.cookie.split(";").reduce((cookies, cookie) => {
       const [name, value] = cookie.trim().split("=");
@@ -37,19 +46,16 @@
     if (!ANALYTICS_ENDPOINT || typeof window === "undefined") return;
 
     const cookies = parseCookies();
-    const client_id = cookies["clientId"];
     const ga_cookie_id = cookies["_ga"];
     const fullstory_id = cookies["_fsuid"];
-    const cart_id = cookies["cartId"];
 
     try {
       const event = {
         event_id: uuidv4(),
         event_name: eventName,
         event_type: "custom",
-        client_id,
+        client_id: getClientId(),
         session_id: getSessionId(),
-        cart_token: cart_id,
         event_timestamp: new Date().toISOString(),
         document: {
           location: {
