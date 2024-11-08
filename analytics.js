@@ -41,6 +41,17 @@
     }, {});
   }
 
+  async function getUserIP() {
+    try {
+      const response = await fetch("https://api.ipify.org?format=json");
+      const data = await response.json();
+      return data.ip;
+    } catch (error) {
+      console.error("Failed to fetch IP:", error);
+      return null;
+    }
+  }
+
   // Analytics sending function
   async function sendGCPData(eventName = "page_viewed", additionalData = {}) {
     if (!ANALYTICS_ENDPOINT || typeof window === "undefined") return;
@@ -78,6 +89,7 @@
           languages: navigator.languages,
           userAgent: navigator.userAgent,
           ga_cookie_id: ga_cookie_id,
+          ip_address: window.Analytics.ip_address || (await getUserIP()),
         },
         window: {
           innerHeight: window.innerHeight,
@@ -230,7 +242,7 @@
   }
 
   // Initialize analytics
-  function initAnalytics(config = {}) {
+  async function initAnalytics(config = {}) {
     // Merge provided config with defaults
     window.ANALYTICS_ENDPOINT = config.endpoint || window.ANALYTICS_ENDPOINT;
 
@@ -241,6 +253,8 @@
     window.Analytics = {
       track: sendGCPData,
       getSessionId: getSessionId,
+      getClientId: getClientId,
+      ip_address: await getUserIP(),
     };
   }
 
