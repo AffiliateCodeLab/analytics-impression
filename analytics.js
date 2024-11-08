@@ -90,7 +90,7 @@
           languages: navigator.languages,
           userAgent: navigator.userAgent,
           ga_cookie_id: ga_cookie_id,
-          ip_address: window.Analytics.ip_address || (await getUserIP()),
+          ip_address: window?.Analytics?.ip_address || (await getUserIP()),
         },
         window: {
           innerHeight: window.innerHeight,
@@ -153,8 +153,6 @@
       this.lastVisibilityChange = Date.now();
       this.maxScrollDepth = 0;
       this.scrollTimeout = null;
-
-      this.initializeTracking();
     }
 
     calculateTimeOnPage() {
@@ -257,6 +255,8 @@
       getClientId: getClientId,
       ip_address: await getUserIP(),
     };
+
+    window.analyticsTracker.initializeTracking();
   }
 
   // Expose initialization function
