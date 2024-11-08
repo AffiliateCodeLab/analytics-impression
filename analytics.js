@@ -1,5 +1,11 @@
 // Self-executing function to avoid global scope pollution
 (function () {
+  // Load nanoid script
+  const script = document.createElement("script");
+  script.src = "https://cdn.jsdelivr.net/npm/nanoid/nanoid.js";
+  script.async = true;
+  document.head.appendChild(script);
+
   // Constants
   const ANALYTICS_ENDPOINT = window.ANALYTICS_ENDPOINT || null;
 
@@ -27,7 +33,10 @@
   function getClientId() {
     let clientId = localStorage.getItem("analytics_client_id");
     if (!clientId) {
-      const nanoid = Math.random().toString(36).substring(2, 14);
+      // Use nanoid if available, fallback to random string
+      const nanoid = window.nanoid
+        ? window.nanoid()
+        : Math.random().toString(36).substring(2, 14);
       clientId = `${Math.floor(Date.now() / 1000)}-${nanoid}`;
       localStorage.setItem("analytics_client_id", clientId);
     }
