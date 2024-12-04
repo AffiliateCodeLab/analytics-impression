@@ -1,4 +1,3 @@
-// Self-executing function to avoid global scope pollution
 (function () {
   const ALPHABET =
     "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
@@ -163,6 +162,8 @@
       this.lastVisibilityChange = Date.now();
       this.maxScrollDepth = 0;
       this.scrollTimeout = null;
+      this.impressionObserver = null;
+      this.trackedImpressions = new WeakSet(); // Using WeakSet to track DOM elements
     }
 
     calculateTimeOnPage() {
@@ -224,6 +225,114 @@
       }, 500);
     }
 
+    initializeImpressionTracking(selectors, options = {}) {
+      const defaultOptions = {
+        threshold: 0.5, // 50% visibility required by default
+        trackOnce: true, // Only track first impression by default
+      };
+
+      const config = { ...defaultOptions, ...options };
+
+      this.impressionObserver = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            // Skip if already tracked and trackOnce is true
+            if (config.trackOnce && this.trackedImpressions.has(entry.target)) {
+              return;
+            }
+
+            if (entry.isIntersecting) {
+              if (config.trackOnce) {
+                this.trackedImpressions.add(entry.target);
+              }
+
+              sendGCPData("component_impression", {
+                component_type: this.getMatchedSelectors(
+                  entry.target,
+                  selectors
+                ),
+                visibility_percentage: Math.round(
+                  entry.intersectionRatio * 100
+                ),
+                time_on_page: this.calculateTimeOnPage(),
+                viewport_data: {
+                  boundingClientRect: entry.boundingClientRect,
+                  intersectionRect: entry.intersectionRect,
+                  rootBounds: entry.rootBounds,
+                },
+                component_metadata: {
+                  classes: entry.target.className,
+                  tag_name: entry.target.tagName.toLowerCase(),
+                  data_attributes: this.getDataAttributes(entry.target),
+                  text_content: entry.target.textContent
+                    ?.trim()
+                    .substring(0, 100), // First 100 chars
+                  position: this.getElementPosition(entry.target),
+                },
+              });
+
+              // If tracking once, stop observing after first impression
+              if (config.trackOnce) {
+                this.impressionObserver.unobserve(entry.target);
+              }
+            }
+          });
+        },
+        {
+          threshold: config.threshold,
+          rootMargin: options.rootMargin || "0px",
+        }
+      );
+
+      // Handle multiple selectors
+      const selectorArray = Array.isArray(selectors) ? selectors : [selectors];
+
+      // Combine all selectors and get unique elements
+      const elements = new Set();
+      selectorArray.forEach((selector) => {
+        document.querySelectorAll(selector).forEach((element) => {
+          elements.add(element);
+        });
+      });
+
+      // Start observing all matching elements
+      elements.forEach((element) => {
+        this.impressionObserver.observe(element);
+      });
+    }
+
+    getMatchedSelectors(element, selectors) {
+      const selectorArray = Array.isArray(selectors) ? selectors : [selectors];
+      return selectorArray
+        .filter((selector) => element.matches(selector))
+        .map((selector) => selector.replace(".", "")); // Remove the dot from class names
+    }
+
+    getElementPosition(element) {
+      const rect = element.getBoundingClientRect();
+      const scrollLeft =
+        window.pageXOffset || document.documentElement.scrollLeft;
+      const scrollTop =
+        window.pageYOffset || document.documentElement.scrollTop;
+
+      return {
+        x: rect.left + scrollLeft,
+        y: rect.top + scrollTop,
+        width: rect.width,
+        height: rect.height,
+        viewport_x: rect.left,
+        viewport_y: rect.top,
+      };
+    }
+
+    getDataAttributes(element) {
+      const dataAttributes = {};
+      for (const key in element.dataset) {
+        dataAttributes[key] = element.dataset[key];
+      }
+      return dataAttributes;
+    }
+
     initializeTracking() {
       // Track initial page view
       sendGCPData("page_viewed", {
@@ -240,6 +349,9 @@
 
       // Track time on page when leaving
       window.addEventListener("beforeunload", () => {
+        if (this.impressionObserver) {
+          this.impressionObserver.disconnect();
+        }
         const timeSpent = this.calculateTimeOnPage();
         sendGCPData("total_time_on_page", {
           duration_seconds: timeSpent,
@@ -254,7 +366,6 @@
   async function initAnalytics(config = {}) {
     // Merge provided config with defaults
     window.ANALYTICS_ENDPOINT = config.endpoint || window.ANALYTICS_ENDPOINT;
-
     // Initialize tracker
     window.analyticsTracker = new EventTracker();
 
@@ -264,6 +375,12 @@
       getSessionId: getSessionId,
       getClientId: getClientId,
       ip_address: await getUserIP(),
+      trackImpressions: (selectors, options) => {
+        window.analyticsTracker.initializeImpressionTracking(
+          selectors,
+          options
+        );
+      },
     };
 
     window.analyticsTracker.initializeTracking();
@@ -272,8 +389,15 @@
   // Expose initialization function
   window.initAnalytics = initAnalytics;
 
-  // Auto-initialize if configuration is already present
-  if (window.ANALYTICS_ENDPOINT) {
-    initAnalytics();
-  }
+  document.addEventListener("DOMContentLoaded", async () => {
+    if (window?.ANALYTICS_ENDPOINT) {
+      await initAnalytics();
+      if (window?.IMPRESSION_CONFIG) {
+        window.analyticsTracker.initializeImpressionTracking(
+          window?.IMPRESSION_CONFIG?.selectors,
+          window?.IMPRESSION_CONFIG?.options
+        );
+      }
+    }
+  });
 })();
