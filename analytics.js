@@ -227,7 +227,7 @@
 
     initializeImpressionTracking(selectors, options = {}) {
       const defaultOptions = {
-        threshold: 0.5, // 50% visibility required by default
+        threshold: 0.25, // 25% visibility required by default
         trackOnce: true, // Only track first impression by default
       };
 
