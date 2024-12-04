@@ -146,9 +146,10 @@
         body: JSON.stringify(finalEvent),
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      // Remove response status check as GCP return status 0
+      // if (!response.ok) {
+      //   throw new Error(`HTTP error! status: ${response.status}`);
+      // }
     } catch (error) {
       console.error("Failed to send analytics:", error);
     }
