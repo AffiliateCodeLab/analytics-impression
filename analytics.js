@@ -54,7 +54,7 @@
     'AdsBot-Google (+http://www.google.com/adsbot.html)'
   ]
 
-  const botCheck = () => {
+  function botCheck() {
     const userAgent = window.navigator.userAgent
     const isPatternBot = BOT_USER_AGENTS.some((pattern) =>
       pattern.test(userAgent)
@@ -79,7 +79,7 @@
   const ANALYTICS_ENDPOINT = window.ANALYTICS_ENDPOINT || null;
   const ANALYTICS_DOMAIN = window.ANALYTICS_DOMAIN || null;
   const ANALYTICS_FORCE_AB_EXPERIMENT = window.ANALYTICS_FORCE_AB_EXPERIMENT || false;
-  
+
   // Utility functions
   function uuidv4() {
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
@@ -461,7 +461,10 @@
         experiment_included_paths,
         experiment_redirect_paths
       } = experimentData
-  
+      
+      console.log('window', window)
+      console.log('ANALYTICS_DOMAIN', ANALYTICS_DOMAIN)
+      console.log('ANALYTICS_FORCE_AB_EXPERIMENT', ANALYTICS_FORCE_AB_EXPERIMENT)
       const isPretest = window.location.href.includes('pretest')
       const isProduction = window.location.hostname === ANALYTICS_DOMAIN
   
