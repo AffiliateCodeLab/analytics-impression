@@ -78,7 +78,8 @@
   // Constants
   const ANALYTICS_ENDPOINT = window.ANALYTICS_ENDPOINT || null;
   const ANALYTICS_DOMAIN = window.ANALYTICS_DOMAIN || null;
-
+  const ANALYTICS_FORCE_AB_EXPERIMENT = window.ANALYTICS_FORCE_AB_EXPERIMENT || false;
+  
   // Utility functions
   function uuidv4() {
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
@@ -464,7 +465,7 @@
       const isPretest = window.location.href.includes('pretest')
       const isProduction = window.location.hostname === ANALYTICS_DOMAIN
   
-      if (!(isPretest || isProduction)) return null
+      if (!(isPretest || isProduction) && !ANALYTICS_FORCE_AB_EXPERIMENT) return null
   
       const experimentVar = cookies[`${experiment_name}-var`]
       if (!experimentVar) return null
