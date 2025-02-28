@@ -461,10 +461,7 @@
         experiment_included_paths,
         experiment_redirect_paths
       } = experimentData
-      
-      console.log('window', window)
-      console.log('ANALYTICS_DOMAIN', ANALYTICS_DOMAIN)
-      console.log('ANALYTICS_FORCE_AB_EXPERIMENT', ANALYTICS_FORCE_AB_EXPERIMENT)
+  
       const isPretest = window.location.href.includes('pretest')
       const isProduction = window.location.hostname === ANALYTICS_DOMAIN
   
