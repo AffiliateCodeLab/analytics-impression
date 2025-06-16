@@ -100,6 +100,8 @@
           userAgent: navigator.userAgent,
           ga_cookie_id: ga_cookie_id,
           ip_address: window?.Analytics?.ip_address || (await getUserIP()),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          timezone_offset: new Date().getTimezoneOffset(),
         },
         window: {
           innerHeight: window.innerHeight,
