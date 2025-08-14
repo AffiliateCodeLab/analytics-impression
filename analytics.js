@@ -203,10 +203,10 @@
 
       if (target) {
         sendGCPData("clicked", {
-          element_id: target.getAttribute('data-testid') || target.id || 'N/A',
-          element_text: target.innerText || 'N/A',
-          href: target.href || 'N/A',
-          class: target.className || 'N/A',
+          link_id: target.getAttribute('data-testid') || target.id || 'N/A',
+          link_text: target.innerText || 'N/A',
+          link_url: target.href || 'N/A',
+          link_class: target.className || 'N/A',
           time_on_page: this.calculateTimeOnPage(),
           click_coordinates: {
             x: event.clientX,
