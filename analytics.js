@@ -194,14 +194,24 @@
     }
 
     handleClick(event) {
-      const clickedElement = event.target.closest("a");
-      if (clickedElement) {
+      const clickPath = event.composedPath();
+
+      // Find the first element in the click path that has a data-testid attribute
+      const targetElement = clickPath.find((element) => element instanceof Element && element.hasAttribute('data-testid'));
+      const target = targetElement || event.target;
+
+
+      if (target) {
         sendGCPData("clicked", {
-          link_url: clickedElement.href,
-          link_text: clickedElement.textContent?.trim(),
-          link_id: clickedElement.id,
-          link_class: clickedElement.className,
+          element_id: target.getAttribute('data-testid') || target.id || 'N/A',
+          element_text: target.innerText || 'N/A',
+          href: target.href || 'N/A',
+          class: target.className || 'N/A',
           time_on_page: this.calculateTimeOnPage(),
+          click_coordinates: {
+            x: event.clientX,
+            y: event.clientY
+          }
         });
       }
     }
