@@ -13,6 +13,9 @@
 
   // Constants
   const ANALYTICS_ENDPOINT = window.ANALYTICS_ENDPOINT || null;
+  const JITSU_COLLECTOR_HOST = "https://ingest.34.71.52.102.nip.io";
+  const JITSU_WRITE_KEY_CLIENT =
+    "O3fXfexlcgjP8ZDGbrwTO8qy05xv8vqK:Kb511Y2CY7fUlnFiybDEZWyMM94NASsZ";
 
   // Utility functions
   function uuidv4() {
@@ -47,9 +50,37 @@
   function parseCookies() {
     return document.cookie.split(";").reduce((cookies, cookie) => {
       const [name, value] = cookie.trim().split("=");
-      cookies[name] = decodeURIComponent(value);
+      if (name && value !== undefined) {
+        cookies[name] = decodeURIComponent(value);
+      }
       return cookies;
     }, {});
+  }
+
+  function setCookie(name, value, options = {}) {
+    let cookieString = `${name}=${encodeURIComponent(value)}`;
+
+    if (options.maxAge) {
+      cookieString += `; Max-Age=${options.maxAge}`;
+    }
+    if (options.path) {
+      cookieString += `; Path=${options.path}`;
+    }
+    if (options.domain) {
+      cookieString += `; Domain=${options.domain}`;
+    }
+    if (options.secure) {
+      cookieString += "; Secure";
+    }
+    if (options.sameSite) {
+      cookieString += `; SameSite=${options.sameSite}`;
+    }
+    if (options.httpOnly) {
+      // Note: HttpOnly can't be set via JavaScript, only server-side
+      console.warn("HttpOnly flag cannot be set via document.cookie");
+    }
+
+    document.cookie = cookieString;
   }
 
   async function getUserIP() {
@@ -63,7 +94,89 @@
     }
   }
 
-  // Analytics sending function
+  // Jitsu Session Management (30 minutes TTL)
+  function generateJitsuSessionId() {
+    const random = () => Math.random().toString(36).slice(2, 10);
+    return `js_${random()}${random()}`;
+  }
+
+  function getJitsuSessionId() {
+    const cookies = parseCookies();
+    let sessionId = cookies["jitsu_session_id"];
+
+    if (!sessionId) {
+      sessionId = generateJitsuSessionId();
+    }
+
+    // Refresh TTL to 30 minutes on every call
+    const isSecure = window.location.protocol === "https:";
+    setCookie("jitsu_session_id", sessionId, {
+      maxAge: 30 * 60, // 30 minutes
+      path: "/",
+      secure: isSecure,
+      sameSite: isSecure ? "None" : "Lax",
+    });
+
+    return sessionId;
+  }
+
+  // ITP Mitigation: Server-side cookie sync
+  async function syncJitsuIdentity() {
+    try {
+      const response = await fetch("/api/jitsu-id", {
+        method: "GET",
+        credentials: "include",
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          anonymousId: data.anonymousId,
+          userId: data.userId,
+        };
+      }
+    } catch (error) {
+      console.error("Failed to sync Jitsu identity:", error);
+    }
+    return null;
+  }
+
+  // Get amp_device_id from URL or localStorage
+  function getAmpDeviceId() {
+    if (typeof window === "undefined") return "";
+
+    const searchValue = new URLSearchParams(window.location.search).get(
+      "amp_device_id"
+    );
+    if (searchValue) {
+      window.localStorage?.setItem?.("amp_device_id", searchValue);
+    }
+
+    return searchValue || window.localStorage?.getItem?.("amp_device_id") || "";
+  }
+
+  // Build identify payload
+  function buildJitsuIdentifyPayload() {
+    const cookies = parseCookies();
+    const userId =
+      cookies["app.client.id"] || cookies["__eventn_uid"] || getClientId();
+    const ampDeviceId = getAmpDeviceId();
+
+    const traits = {};
+
+    if (ampDeviceId) traits.amp_device_id = ampDeviceId;
+    if (userId) traits["app.client.id"] = userId;
+
+    // Note: email_address and phone_number can be added manually via:
+    // window.Analytics.identify() with updated traits when available
+
+    return {
+      userId: userId || traits["app.client.id"] || undefined,
+      traits: traits,
+    };
+  }
+
+  // Analytics sending function (GCP - EXISTING, DO NOT MODIFY)
   async function sendGCPData(eventName = "page_viewed", additionalData = {}) {
     if (!ANALYTICS_ENDPOINT || typeof window === "undefined") return;
 
@@ -154,6 +267,46 @@
     }
   }
 
+  // Jitsu tracking function (NEW - PARALLEL IMPLEMENTATION)
+  async function sendJitsuData(eventName, additionalData = {}) {
+    if (typeof window === "undefined") return;
+
+    const jitsu = window.__jitsu || window.jitsu;
+
+    // Add Jitsu session to payload
+    const sessionId = getJitsuSessionId();
+    const payload = {
+      ...additionalData,
+      jitsu_session_id: sessionId,
+    };
+
+    const invoke = (instance) => {
+      try {
+        instance.track(eventName, payload);
+      } catch (error) {
+        console.error("Failed to send Jitsu data:", error);
+      }
+    };
+
+    if (jitsu && typeof jitsu.track === "function") {
+      invoke(jitsu);
+      return;
+    }
+
+    // Queue if Jitsu isn't ready yet
+    window.jitsuQ = window.jitsuQ || [];
+    window.jitsuQ.push((instance) => invoke(instance));
+  }
+
+  // Unified tracking function - sends to BOTH GCP and Jitsu
+  async function trackEvent(eventName, additionalData = {}) {
+    // Send to GCP (existing)
+    await sendGCPData(eventName, additionalData);
+
+    // Send to Jitsu (new, parallel)
+    await sendJitsuData(eventName, additionalData);
+  }
+
   // Event Tracker Class
   class EventTracker {
     constructor() {
@@ -177,13 +330,13 @@
     handleVisibilityChange() {
       if (document.hidden) {
         this.isHidden = true;
-        sendGCPData("page_hidden", {
+        trackEvent("page_hidden", {
           time_on_page: this.calculateTimeOnPage(),
         });
       } else {
         this.isHidden = false;
         this.lastVisibilityChange = Date.now();
-        sendGCPData("page_visible", {
+        trackEvent("page_visible", {
           time_on_page: this.calculateTimeOnPage(),
         });
       }
@@ -192,7 +345,7 @@
     handleClick(event) {
       const clickedElement = event.target.closest("a");
       if (clickedElement) {
-        sendGCPData("clicked", {
+        trackEvent("clicked", {
           link_url: clickedElement.href,
           link_text: clickedElement.textContent?.trim(),
           link_id: clickedElement.id,
@@ -215,7 +368,7 @@
 
         if (scrollDepth > this.maxScrollDepth) {
           this.maxScrollDepth = scrollDepth;
-          sendGCPData("scroll_depth", {
+          trackEvent("scroll_depth", {
             depth_percentage: scrollDepth,
             scroll_position: scrollPosition,
             time_on_page: this.calculateTimeOnPage(),
@@ -226,7 +379,7 @@
 
     initializeTracking() {
       // Track initial page view
-      sendGCPData("page_viewed", {
+      trackEvent("page_viewed", {
         initial_referrer: document.referrer,
         page_title: document.title,
       });
@@ -241,7 +394,7 @@
       // Track time on page when leaving
       window.addEventListener("beforeunload", () => {
         const timeSpent = this.calculateTimeOnPage();
-        sendGCPData("total_time_on_page", {
+        trackEvent("total_time_on_page", {
           duration_seconds: timeSpent,
           session_duration: Date.now() - this.startTime,
           max_scroll_depth: this.maxScrollDepth,
@@ -250,19 +403,124 @@
     }
   }
 
+  // Track last identify payload to prevent duplicates
+  let lastIdentifyPayload = null;
+
+  // Jitsu identify function - triggers when identity data is available
+  function identifyUser() {
+    const jitsu = window.__jitsu || window.jitsu;
+    if (!jitsu || typeof jitsu.identify !== "function") return false;
+
+    const { userId, traits } = buildJitsuIdentifyPayload();
+    const resolvedUserId = userId || traits["app.client.id"];
+    const hasTraits = Object.keys(traits).length > 0;
+
+    if (!resolvedUserId && !hasTraits) return false;
+
+    // Prevent duplicate identify calls with same payload
+    const payloadKey = JSON.stringify({ userId: resolvedUserId, traits });
+    if (lastIdentifyPayload === payloadKey) return false;
+
+    try {
+      jitsu.identify(resolvedUserId, traits);
+      lastIdentifyPayload = payloadKey;
+      return true;
+    } catch (error) {
+      console.error("Failed to identify user in Jitsu:", error);
+      return false;
+    }
+  }
+
+  // Load Jitsu script dynamically
+  function loadJitsuScript() {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = `${JITSU_COLLECTOR_HOST}/p.js`;
+      script.async = true;
+      script.type = "text/javascript";
+      script.setAttribute("data-write-key", JITSU_WRITE_KEY_CLIENT);
+      script.setAttribute("data-tracking-host", JITSU_COLLECTOR_HOST);
+      script.setAttribute("data-id-endpoint", "/api/jitsu-id");
+
+      script.onload = () => {
+        // Set up processing queue
+        if (window.jitsuQ && Array.isArray(window.jitsuQ)) {
+          window.jitsuQ.forEach((callback) => {
+            if (typeof callback === "function") {
+              callback(window.jitsu || window.__jitsu);
+            }
+          });
+        }
+
+        // Store Jitsu instance
+        window.__jitsu = window.jitsu || window.__jitsu;
+
+        // Try to identify user
+        identifyUser();
+
+        resolve(window.__jitsu);
+      };
+
+      script.onerror = () => {
+        console.error("Failed to load Jitsu script");
+        reject(new Error("Jitsu script load failed"));
+      };
+
+      document.head.appendChild(script);
+    });
+  }
+
   // Initialize analytics
   async function initAnalytics(config = {}) {
     // Merge provided config with defaults
     window.ANALYTICS_ENDPOINT = config.endpoint || window.ANALYTICS_ENDPOINT;
+
+    // Initialize ITP mitigation (server-side identity sync)
+    const identity = await syncJitsuIdentity();
+    if (identity) {
+      console.log("Jitsu identity synced:", identity);
+    }
+
+    // Load Jitsu script
+    try {
+      await loadJitsuScript();
+      console.log("Jitsu loaded successfully");
+
+      // Set up periodic identify checks (every 5 seconds)
+      // This will trigger identify when amp_device_id, email, phone, or app.client.id becomes available
+      window.jitsuIdentifyInterval = setInterval(() => {
+        identifyUser();
+      }, 5000);
+    } catch (error) {
+      console.error("Failed to initialize Jitsu:", error);
+    }
 
     // Initialize tracker
     window.analyticsTracker = new EventTracker();
 
     // Expose analytics API
     window.Analytics = {
-      track: sendGCPData,
+      track: trackEvent, // Now sends to both GCP and Jitsu
+      trackGCP: sendGCPData, // Direct GCP access if needed
+      trackJitsu: sendJitsuData, // Direct Jitsu access if needed
+      identify: identifyUser, // Manual identify trigger
+      updateIdentity: (traits) => {
+        // Allow manual identity updates with email, phone, etc.
+        const jitsu = window.__jitsu || window.jitsu;
+        if (jitsu && typeof jitsu.identify === "function") {
+          const { userId } = buildJitsuIdentifyPayload();
+          const existingTraits = buildJitsuIdentifyPayload().traits;
+          const mergedTraits = { ...existingTraits, ...traits };
+          jitsu.identify(userId, mergedTraits);
+          lastIdentifyPayload = JSON.stringify({
+            userId,
+            traits: mergedTraits,
+          });
+        }
+      },
       getSessionId: getSessionId,
       getClientId: getClientId,
+      getJitsuSessionId: getJitsuSessionId,
       ip_address: await getUserIP(),
     };
 
@@ -271,6 +529,13 @@
 
   // Expose initialization function
   window.initAnalytics = initAnalytics;
+
+  // Cleanup function
+  window.cleanupAnalytics = () => {
+    if (window.jitsuIdentifyInterval) {
+      clearInterval(window.jitsuIdentifyInterval);
+    }
+  };
 
   // Auto-initialize if configuration is already present
   if (window.ANALYTICS_ENDPOINT) {
