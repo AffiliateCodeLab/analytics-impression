@@ -155,7 +155,7 @@
     return searchValue || window.localStorage?.getItem?.("amp_device_id") || "";
   }
 
-  // Build identify payload
+  // Build base identify payload from cookies/localStorage
   function buildJitsuIdentifyPayload() {
     const cookies = parseCookies();
     const userId =
@@ -167,13 +167,42 @@
     if (ampDeviceId) traits.amp_device_id = ampDeviceId;
     if (userId) traits["app.client.id"] = userId;
 
-    // Note: email_address and phone_number can be added manually via:
-    // window.Analytics.identify() with updated traits when available
-
     return {
       userId: userId || traits["app.client.id"] || undefined,
       traits: traits,
     };
+  }
+
+  // Build traits from explicit input parameters
+  function buildIdentifyTraitsFromInput(input) {
+    const traits = {};
+
+    if (input?.ampDeviceId) traits.amp_device_id = input.ampDeviceId;
+    if (input?.clientId) traits["app.client.id"] = input.clientId;
+    if (input?.email) traits.email_address = input.email;
+    if (input?.phone) traits.phone_number = input.phone;
+
+    return traits;
+  }
+
+  // Build final identify arguments (merges base + input + custom traits)
+  function buildIdentifyArgs(input) {
+    const base = buildJitsuIdentifyPayload();
+    const inputTraits = buildIdentifyTraitsFromInput(input);
+    const traits = { ...base.traits, ...inputTraits, ...(input?.traits || {}) };
+
+    // Prefer a stable, non-PII identifier when available.
+    // Priority order: clientId > ampDeviceId > email > phone
+    const resolvedUserId =
+      input?.clientId ||
+      base.userId ||
+      traits["app.client.id"] ||
+      input?.ampDeviceId ||
+      input?.email ||
+      input?.phone ||
+      undefined;
+
+    return { userId: resolvedUserId, traits };
   }
 
   // Analytics sending function (GCP - EXISTING, DO NOT MODIFY)
@@ -404,31 +433,47 @@
   }
 
   // Track last identify payload to prevent duplicates
-  let lastIdentifyPayload = null;
+  let lastIdentifyPayloadKey = null;
 
   // Jitsu identify function - triggers when identity data is available
-  function identifyUser() {
+  // Parameters (all optional):
+  //   input.email - User email address
+  //   input.phone - User phone number
+  //   input.ampDeviceId - Amplitude device ID
+  //   input.clientId - App client ID
+  //   input.traits - Additional custom traits
+  function identifyJitsu(input) {
+    if (typeof window === "undefined") return;
+
+    const invoke = (instance) => {
+      try {
+        const { userId, traits } = buildIdentifyArgs(input);
+        const hasTraits = Object.keys(traits).length > 0;
+        if (!userId && !hasTraits) return;
+
+        // Prevent duplicate identify calls with same payload
+        const payloadKey = JSON.stringify({ userId, traits });
+        if (lastIdentifyPayloadKey === payloadKey) return;
+
+        lastIdentifyPayloadKey = payloadKey;
+        instance.identify(userId, traits);
+      } catch (error) {
+        console.error("Failed to identify Jitsu user:", error);
+      }
+    };
+
     const jitsu = window.__jitsu || window.jitsu;
-    if (!jitsu || typeof jitsu.identify !== "function") return false;
-
-    const { userId, traits } = buildJitsuIdentifyPayload();
-    const resolvedUserId = userId || traits["app.client.id"];
-    const hasTraits = Object.keys(traits).length > 0;
-
-    if (!resolvedUserId && !hasTraits) return false;
-
-    // Prevent duplicate identify calls with same payload
-    const payloadKey = JSON.stringify({ userId: resolvedUserId, traits });
-    if (lastIdentifyPayload === payloadKey) return false;
-
-    try {
-      jitsu.identify(resolvedUserId, traits);
-      lastIdentifyPayload = payloadKey;
-      return true;
-    } catch (error) {
-      console.error("Failed to identify user in Jitsu:", error);
-      return false;
+    if (jitsu && typeof jitsu.identify === "function") {
+      invoke(jitsu);
+      return;
     }
+
+    // Queue if Jitsu isn't ready yet
+    window.jitsuQ = window.jitsuQ || [];
+    window.jitsuQ.push((instance) => {
+      window.__jitsu = instance;
+      invoke(instance);
+    });
   }
 
   // Load Jitsu script dynamically
@@ -443,20 +488,20 @@
       script.setAttribute("data-id-endpoint", "/api/jitsu-id");
 
       script.onload = () => {
+        // Store Jitsu instance first
+        window.__jitsu = window.jitsu || window.__jitsu;
+
         // Set up processing queue
         if (window.jitsuQ && Array.isArray(window.jitsuQ)) {
           window.jitsuQ.forEach((callback) => {
             if (typeof callback === "function") {
-              callback(window.jitsu || window.__jitsu);
+              callback(window.__jitsu);
             }
           });
         }
 
-        // Store Jitsu instance
-        window.__jitsu = window.jitsu || window.__jitsu;
-
         // Try to identify user
-        identifyUser();
+        identifyJitsu();
 
         resolve(window.__jitsu);
       };
@@ -485,12 +530,6 @@
     try {
       await loadJitsuScript();
       console.log("Jitsu loaded successfully");
-
-      // Set up periodic identify checks (every 5 seconds)
-      // This will trigger identify when amp_device_id, email, phone, or app.client.id becomes available
-      window.jitsuIdentifyInterval = setInterval(() => {
-        identifyUser();
-      }, 5000);
     } catch (error) {
       console.error("Failed to initialize Jitsu:", error);
     }
@@ -503,20 +542,11 @@
       track: trackEvent, // Now sends to both GCP and Jitsu
       trackGCP: sendGCPData, // Direct GCP access if needed
       trackJitsu: sendJitsuData, // Direct Jitsu access if needed
-      identify: identifyUser, // Manual identify trigger
-      updateIdentity: (traits) => {
+      identify: identifyJitsu, // Manual identify trigger (accepts optional parameters)
+      updateIdentity: (input) => {
         // Allow manual identity updates with email, phone, etc.
-        const jitsu = window.__jitsu || window.jitsu;
-        if (jitsu && typeof jitsu.identify === "function") {
-          const { userId } = buildJitsuIdentifyPayload();
-          const existingTraits = buildJitsuIdentifyPayload().traits;
-          const mergedTraits = { ...existingTraits, ...traits };
-          jitsu.identify(userId, mergedTraits);
-          lastIdentifyPayload = JSON.stringify({
-            userId,
-            traits: mergedTraits,
-          });
-        }
+        // Can pass: { email, phone, ampDeviceId, clientId, traits }
+        identifyJitsu(input);
       },
       getSessionId: getSessionId,
       getClientId: getClientId,
@@ -529,13 +559,6 @@
 
   // Expose initialization function
   window.initAnalytics = initAnalytics;
-
-  // Cleanup function
-  window.cleanupAnalytics = () => {
-    if (window.jitsuIdentifyInterval) {
-      clearInterval(window.jitsuIdentifyInterval);
-    }
-  };
 
   // Auto-initialize if configuration is already present
   if (window.ANALYTICS_ENDPOINT) {

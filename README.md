@@ -87,13 +87,22 @@ window.Analytics.trackGCP("event_name", { data });
 // Track to Jitsu only
 window.Analytics.trackJitsu("event_name", { data });
 
-// Manually trigger identify
+// Identify user (auto-detects from cookies/localStorage)
 window.Analytics.identify();
 
-// Update user identity with email/phone
+// Identify with explicit parameters
+window.Analytics.identify({
+  email: "user@example.com",
+  phone: "+1234567890",
+  ampDeviceId: "device_123",
+  clientId: "client_456",
+  traits: { custom_field: "value" },
+});
+
+// Update user identity (alias for identify)
 window.Analytics.updateIdentity({
-  email_address: "user@example.com",
-  phone_number: "+1234567890",
+  email: "user@example.com",
+  phone: "+1234567890",
 });
 
 // Get IDs
@@ -117,14 +126,22 @@ The following events are tracked automatically:
 
 ## Identity Resolution
 
-The script automatically identifies users when ANY of these become available:
+The script identifies users based on available data with the following priority:
 
-- `amp_device_id` (from URL query param or localStorage)
-- `email_address` (via `updateIdentity()`)
-- `phone_number` (via `updateIdentity()`)
-- `app.client.id` (from cookie or auto-generated)
+**User ID Priority** (most stable → least stable):
 
-It checks every 5 seconds and only sends identify when data changes.
+1. `clientId` (app.client.id from cookie or explicit)
+2. `ampDeviceId` (from URL `?amp_device_id=...` or localStorage)
+3. `email` (explicitly provided)
+4. `phone` (explicitly provided)
+
+**Automatic Detection:**
+
+- `amp_device_id`: Captured from URL query param and stored in localStorage
+- `app.client.id`: Read from cookie or auto-generated
+- Custom traits: Must be explicitly provided via `identify()` or `updateIdentity()`
+
+**Deduplication:** Only sends identify when payload changes (prevents redundant calls).
 
 ## Data Sent to Each Platform
 
@@ -176,10 +193,11 @@ It checks every 5 seconds and only sends identify when data changes.
       });
 
       // Update identity when user logs in
-      function onUserLogin(email, phone) {
-        window.Analytics.updateIdentity({
-          email_address: email,
-          phone_number: phone,
+      function onUserLogin(email, phone, clientId) {
+        window.Analytics.identify({
+          email: email,
+          phone: phone,
+          clientId: clientId,
         });
       }
     </script>
@@ -218,18 +236,6 @@ It checks every 5 seconds and only sends identify when data changes.
 
 - Jitsu Collector Host: `https://ingest.34.71.52.102.nip.io`
 - Client Write Key: `O3fXfexlcgjP8ZDGbrwTO8qy05xv8vqK:Kb511Y2CY7fUlnFiybDEZWyMM94NASsZ`
-
-**Server Write Key** (for backend use only):
-
-- `yjFTWTpxsJ4jTyeZ15FxP2yqXsPHuHZu:bESOg8xmX2XuXF8Sly0JTQ0D9BbJxaAk`
-
-## Cleanup
-
-To stop tracking and cleanup intervals:
-
-```javascript
-window.cleanupAnalytics();
-```
 
 ## Browser Support
 
