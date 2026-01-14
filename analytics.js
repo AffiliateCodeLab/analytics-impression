@@ -1,4 +1,69 @@
 (function () {
+  const BOT_USER_AGENTS = [
+    /bot/i,
+    /crawler/i,
+    /spider/i,
+    /facebookexternalhit/i,
+    /googlebot/i,
+    /bingbot/i,
+    /yandexbot/i,
+    /ahrefsbot/i,
+    /petalbot/i,
+    /applebot/i,
+    /hubspot/i,
+    /virustotalbot/i,
+    /semrushbot/i,
+    /pinterestbot/i,
+    /screaming frog/i,
+    /mj12bot/i,
+    /sitebulb/i,
+    /rogerbot/i,
+    /dotbot/i,
+    /mail\.ru_bot/i,
+    /gigabot/i,
+    /adsbot-google/i,
+    /google-safety/i,
+    /baiduspider/i,
+    /bytebot/i,
+    /turnitin/i,
+    /twitterbot/i,
+    /adsbot/i,
+    /Google-Safety/i,
+    /Cincraw/i,
+    /Indexation bot/i,
+    /WebZIP/i,
+    /Storebot-Google/i,
+    /Taboolabot/i,
+    /BitSightBot/i,
+    /PadletBot/i,
+    /BrightEdge Crawler/i,
+    /AdsBot-Google-Mobile/i,
+    /AhrefsSiteAudit/i
+  ]
+
+  const SPECIFIC_USER_AGENTS = [
+    'Mozilla/5.0 (compatible; HubSpot Crawler; +https://www.hubspot.com)',
+    'Facebot',
+    'Mozilla/5.0 (compatible; tracking-quality-spider/0.1; https://www.awin.com)',
+    'Mozilla/5.0 (compatible; ev-crawler/1.0; +https://headline.com/legal/crawler)',
+    'Mozilla/5.0 (compatible; SeekportBot; +https://bot.seekport.com)',
+    'Mozilla/5.0 (compatible; ScrapeheroBot/1.0; +https://scrapehero.de/)',
+    'Mozilla/5.0 (compatible; adidxbot/2.0; +http://www.bing.com/bingbot.htm)',
+    'Indexation bot (web.primals.net)',
+    'Mozilla/5.0 (compatible;Impact Radius Compliance Bot) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.6045.214 Safari/537.36',
+    'AdsBot-Google (+http://www.google.com/adsbot.html)'
+  ]
+
+  function botCheck() {
+    const userAgent = window.navigator.userAgent
+    const isPatternBot = BOT_USER_AGENTS.some((pattern) =>
+      pattern.test(userAgent)
+    )
+    const isSpecificBot = SPECIFIC_USER_AGENTS.includes(userAgent)
+
+    return isPatternBot || isSpecificBot
+  }
+
   const ALPHABET =
     "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
   const nanoid = (size = 21) => {
@@ -12,6 +77,8 @@
 
   // Constants
   const ANALYTICS_ENDPOINT = window.ANALYTICS_ENDPOINT || null;
+  const ANALYTICS_DOMAIN = window.ANALYTICS_DOMAIN || null;
+  const ANALYTICS_FORCE_AB_EXPERIMENT = window.ANALYTICS_FORCE_AB_EXPERIMENT || false;
 
   // Utility functions
   function uuidv4() {
@@ -51,6 +118,22 @@
     }, {});
   }
 
+  function getCookie(name) {
+    const value = `; ${document.cookie}`
+    const parts = value.split(`; ${name}=`)
+    if (parts.length === 2) return parts.pop().split(';').shift()
+  }
+
+  function setCookie(name, value, days) {
+    var expires = ''
+    if (days) {
+      var date = new Date()
+      date.setTime(date.getTime() + days * 24 * 60 * 60 * 1000)
+      expires = '; expires=' + date.toUTCString()
+    }
+    document.cookie = name + '=' + (value || '') + expires + '; path=/'
+  }
+
   async function getUserIP() {
     try {
       const response = await fetch("https://api.ipify.org?format=json");
@@ -59,6 +142,17 @@
     } catch (error) {
       console.error("Failed to fetch IP:", error);
       return null;
+    }
+  }
+
+  function getUserData() {
+    const client_id = getClientId()
+    const session_id = getSessionId()
+
+    return {
+      user_id: client_id || '', // Custom Generated Client ID
+      session_id: session_id || '', // Custom Generated Session ID (if available)
+      amp_device_id: window.localStorage.getItem?.('amp_device_id') || '' // AMP Device ID (if available)
     }
   }
 
@@ -153,6 +247,25 @@
       // }
     } catch (error) {
       console.error("Failed to send analytics:", error);
+    }
+  }
+
+  const sendGTM = (event, data) => {
+    if (window.dataLayer) {
+      window.dataLayer.push({
+        event,
+        ...data
+      })
+    }
+  }
+
+  const sendGA = (event, data) => {
+    if (window.gtag) {
+      const userData = getUserData()
+      window.gtag('event', event, {
+        ...userData,
+        ...data
+      })
     }
   }
 
@@ -346,12 +459,78 @@
       return dataAttributes;
     }
 
+    trackAndReportABExperiment() {
+      const cookies = parseCookies()
+  
+      const experimentData = cookies['ab-experiment-data']
+        ? JSON.parse(cookies['ab-experiment-data'])
+        : null
+      if (!experimentData) return null
+      
+      const {
+        experiment_name,
+        experiment_timestamp,
+        experiment_included_paths,
+        experiment_redirect_paths
+      } = experimentData
+  
+      const isPretest = window.location.href.includes('pretest')
+      const isProduction = window.location.hostname === ANALYTICS_DOMAIN
+  
+      if (!(isPretest || isProduction) && !ANALYTICS_FORCE_AB_EXPERIMENT) return null
+  
+      const experimentVar = cookies[`${experiment_name}-var`]
+      if (!experimentVar) return null
+  
+      const timestampKey = `${experiment_name}-timestamp`
+      let userTimestamp = cookies[timestampKey]
+  
+      if (!userTimestamp) {
+        userTimestamp = Math.floor(Date.now() / 1000).toString()
+        setCookie(timestampKey, userTimestamp, 365) // 1 year
+      }
+  
+      const data = {
+        experiment_key: experiment_name,
+        experiment_name: experiment_name,
+        experiment_var: experimentVar,
+        user_type:
+          +userTimestamp >= experiment_timestamp ? 'new user' : 'returning user',
+        user_timestamp: userTimestamp,
+        experiment_timestamp: experiment_timestamp,
+        experiment_env: isPretest ? 'PRETEST' : 'PRODUCTION'
+      }
+  
+      const pathname = window.location.pathname
+      const isBot = botCheck()
+  
+      if (
+        experiment_included_paths.some((path) => pathname === path) ||
+        experiment_redirect_paths.some((path) => pathname === path)
+      ) {
+        sendGTM('ab_experiment_init', data)
+        sendGA('ab_experiment_init', data)
+        sendGCPData('ab_experiment_init', data)
+  
+        if (!isBot) sendGCPData('ab_experiment_init_not_bot', data)
+  
+        if (window.FS) {
+          window.FS('trackEvent', {
+            name: 'bmo_experiment_init',
+            properties: data
+          })
+        }
+      }
+    }
+
     initializeTracking() {
       // Track initial page view
       sendGCPData("page_viewed", {
         initial_referrer: document.referrer,
         page_title: document.title,
       });
+
+      this.trackAndReportABExperiment()
 
       // Set up event listeners
       document.addEventListener("visibilitychange", () =>
