@@ -25,7 +25,7 @@
         const r = (Math.random() * 16) | 0;
         const v = c === "x" ? r : (r & 0x3) | 0x8;
         return v.toString(16);
-      }
+      },
     );
   }
 
@@ -146,7 +146,7 @@
     if (typeof window === "undefined") return "";
 
     const searchValue = new URLSearchParams(window.location.search).get(
-      "amp_device_id"
+      "amp_device_id",
     );
     if (searchValue) {
       window.localStorage?.setItem?.("amp_device_id", searchValue);
@@ -298,33 +298,37 @@
 
   // Jitsu tracking function (NEW - PARALLEL IMPLEMENTATION)
   async function sendJitsuData(eventName, additionalData = {}) {
-    if (typeof window === "undefined") return;
+    try {
+      if (typeof window === "undefined") return;
 
-    const jitsu = window.__jitsu || window.jitsu;
+      const jitsu = window.__jitsu || window.jitsu;
 
-    // Add Jitsu session to payload
-    const sessionId = getJitsuSessionId();
-    const payload = {
-      ...additionalData,
-      jitsu_session_id: sessionId,
-    };
+      // Add Jitsu session to payload
+      const sessionId = getJitsuSessionId();
+      const payload = {
+        ...additionalData,
+        jitsu_session_id: sessionId,
+      };
 
-    const invoke = (instance) => {
-      try {
-        instance.track(eventName, payload);
-      } catch (error) {
-        console.error("Failed to send Jitsu data:", error);
+      const invoke = (instance) => {
+        try {
+          instance.track(eventName, payload);
+        } catch (error) {
+          console.error("Failed to send Jitsu data:", error);
+        }
+      };
+
+      if (jitsu && typeof jitsu.track === "function") {
+        invoke(jitsu);
+        return;
       }
-    };
 
-    if (jitsu && typeof jitsu.track === "function") {
-      invoke(jitsu);
-      return;
+      // Queue if Jitsu isn't ready yet
+      window.jitsuQ = window.jitsuQ || [];
+      window.jitsuQ.push((instance) => invoke(instance));
+    } catch (error) {
+      console.error("Failed to send Jitsu data:", error);
     }
-
-    // Queue if Jitsu isn't ready yet
-    window.jitsuQ = window.jitsuQ || [];
-    window.jitsuQ.push((instance) => invoke(instance));
   }
 
   // Unified tracking function - sends to BOTH GCP and Jitsu
@@ -415,7 +419,7 @@
 
       // Set up event listeners
       document.addEventListener("visibilitychange", () =>
-        this.handleVisibilityChange()
+        this.handleVisibilityChange(),
       );
       document.addEventListener("click", (e) => this.handleClick(e));
       window.addEventListener("scroll", () => this.handleScroll());
@@ -521,9 +525,13 @@
     window.ANALYTICS_ENDPOINT = config.endpoint || window.ANALYTICS_ENDPOINT;
 
     // Initialize ITP mitigation (server-side identity sync)
-    const identity = await syncJitsuIdentity();
-    if (identity) {
-      console.log("Jitsu identity synced:", identity);
+    try {
+      const identity = await syncJitsuIdentity();
+      if (identity) {
+        console.log("Jitsu identity synced:", identity);
+      }
+    } catch (error) {
+      console.error("Failed to sync Jitsu identity:", error);
     }
 
     // Load Jitsu script
