@@ -337,7 +337,7 @@
     await sendGCPData(eventName, additionalData);
 
     // Send to Jitsu (new, parallel)
-    await sendJitsuData(eventName, additionalData);
+    // await sendJitsuData(eventName, additionalData);
   }
 
   // Event Tracker Class
