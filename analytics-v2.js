@@ -136,7 +136,7 @@
         };
       }
     } catch (error) {
-      console.error("Failed to sync Jitsu identity:", error);
+      console.warn("Failed to sync Jitsu identity:", error);
     }
     return null;
   }
@@ -525,14 +525,14 @@
     window.ANALYTICS_ENDPOINT = config.endpoint || window.ANALYTICS_ENDPOINT;
 
     // Initialize ITP mitigation (server-side identity sync)
-    try {
-      const identity = await syncJitsuIdentity();
-      if (identity) {
-        console.log("Jitsu identity synced:", identity);
-      }
-    } catch (error) {
-      console.error("Failed to sync Jitsu identity:", error);
-    }
+    // try {
+    //   const identity = await syncJitsuIdentity();
+    //   if (identity) {
+    //     console.log("Jitsu identity synced:", identity);
+    //   }
+    // } catch (error) {
+    //   console.error("Failed to sync Jitsu identity:", error);
+    // }
 
     // Load Jitsu script
     try {
